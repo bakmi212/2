@@ -27,7 +27,6 @@ interface Category {
 interface Product {
   id: string
   name: string
-  slug: string
   description: string | null
   short_description: string | null
   price: number
@@ -86,7 +85,7 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
   const [variants, setVariants] = useState<Variant[]>([])
 
   const [form, setForm] = useState<Record<string, any>>({
-    name: '', slug: '', description: '', short_description: '', price: '', compare_price: '', category_id: '',
+    name: '', description: '', short_description: '', price: '', compare_price: '', category_id: '',
     image_url: '', status: 'active', download_type: '', download_url: '',
     affiliate_enabled: false, commission_type: '', commission_value: '',
     license_enabled: false, license_type: '', license_duration: '', custom_license_days: '',
@@ -103,8 +102,8 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
       ])
       if (product) {
         setForm({
+          id: product.id,
           name: product.name || '',
-          slug: product.slug || '',
           description: product.description || '',
           short_description: product.short_description || '',
           price: product.price?.toString() || '',
@@ -113,6 +112,7 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
           image_url: product.image_url || '',
           status: product.status || 'active',
           download_type: product.download_type || '',
+          download_file: product.download_file || '',
           download_url: product.download_url || '',
           affiliate_enabled: product.affiliate_enabled || false,
           commission_type: product.commission_type || '',
@@ -217,9 +217,11 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
     let imageUrl = form.image_url
     let downloadFilePath = form.download_file
 
+    console.log('Product UUID:', id)
+
     if (imageFile) {
       setImageUploading(true)
-      const newUrl = await uploadProductImage(imageFile, form.slug || form.name)
+      const newUrl = await uploadProductImage(imageFile, id)
       setImageUploading(false)
       if (newUrl) {
         if (form.image_url) await deleteProductImage(form.image_url)
@@ -234,7 +236,7 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
 
     if (form.download_type === 'file_upload' && downloadFile) {
       setDownloadUploading(true)
-      const newPath = await uploadProductDownload(downloadFile, form.slug || form.name)
+      const newPath = await uploadProductDownload(downloadFile, id)
       setDownloadUploading(false)
       if (newPath) {
         if (form.download_file) await deleteProductDownload(form.download_file)
@@ -248,11 +250,13 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
     }
 
     const payload: Record<string, any> = {
-      name: form.name, slug: form.slug, description: form.description || null,
+      name: form.name,
+      description: form.description || null,
       short_description: form.short_description || null,
       price: variantsEnabled ? 0 : parseFloat(form.price),
       compare_price: form.compare_price ? parseFloat(form.compare_price) : null,
-      category_id: form.category_id || null, image_url: imageUrl || null,
+      category_id: form.category_id || null,
+      image_url: imageUrl || null,
       status: form.status,
       download_type: form.download_type || null,
       download_file: form.download_type === 'file_upload' ? downloadFilePath : null,
@@ -336,10 +340,7 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
         </CardHeader>
         <form onSubmit={handleSave}>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
-              <div className="space-y-2"><Label>Slug</Label><Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} /></div>
-            </div>
+            <div className="space-y-2"><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
             <div className="space-y-2"><Label>Short Description</Label><Input value={form.short_description || ''} onChange={(e) => setForm({ ...form, short_description: e.target.value })} /></div>
             <div className="space-y-2"><Label>Description</Label><Textarea value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
 

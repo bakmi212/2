@@ -19,24 +19,39 @@ interface Action {
   enabled: boolean
 }
 
-function getProductPurchaseUrl(actions: Action[], productSlug: string): string {
+// Generate checkout URL using product UUID
+function getProductPurchaseUrl(actions: Action[], productId: string): string {
+  console.log('Product UUID:', productId)
   const purchaseAction = actions?.find((a: Action) => a.enabled && a.type === 'product_purchase')
   if (purchaseAction?.config?.productId) {
-    const { productId, variantId, productSlug: actionSlug } = purchaseAction.config
-    const productRef = actionSlug || productId
-    let url = `/checkout?product=${productRef}&action=product_purchase`
-    if (variantId) url += `&variant=${variantId}`
+    const { productId: actionProductId, variantId } = purchaseAction.config
+    let url = `/checkout?product_id=${actionProductId}`
+    if (variantId) url += `&variant_id=${variantId}`
     return url
   }
-  return `/checkout?product=${productSlug}`
+  return `/checkout?product_id=${productId}`
 }
 
-export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params
+// Validate UUID format
+function isValidUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+}
+
+export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const supabase = await createServerClient()
 
-  const { data: product } = await supabase.from('products').select('*, category:categories(*)').eq('slug', slug).single()
+  // Validate UUID format
+  if (!isValidUUID(id)) {
+    console.error('Invalid product ID format. Expected UUID, got:', id)
+    notFound()
+  }
+
+  // Query by UUID, not slug
+  const { data: product } = await supabase.from('products').select('*, category:categories(*)').eq('id', id).single()
   if (!product) notFound()
+
+  console.log('Product UUID:', product.id)
 
   const isAvailable = product.status === 'active'
   const builderContent: BuilderBlock[] = product.builder_content || []
@@ -52,14 +67,14 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
 
   const getCtaUrl = (actions?: Action[]) => {
     if (actions?.length) {
-      const url = getProductPurchaseUrl(actions, product.slug)
-      if (url !== `/checkout?product=${product.slug}`) return url
+      const url = getProductPurchaseUrl(actions, product.id)
+      if (url !== `/checkout?product_id=${product.id}`) return url
     }
     switch (product.cta_type) {
       case 'whatsapp': return product.whatsapp_number ? `https://wa.me/${product.whatsapp_number}` : '#'
       case 'external_link': return product.external_url || '#'
       case 'order_form': return '#'
-      default: return `/checkout?product=${product.slug}`
+      default: return `/checkout?product_id=${product.id}`
     }
   }
 
@@ -93,7 +108,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             </div>
           </div>
           <div>
-            <div className="mb-4">{product.category && <Link href={`/categories/${product.category.slug}`} className="text-sm text-primary hover:underline">{product.category.name}</Link>}</div>
+            <div className="mb-4">{product.category && <Link href={`/categories/${product.category.id}`} className="text-sm text-primary hover:underline">{product.category.name}</Link>}</div>
             <h1 className="text-3xl md:text-4xl font-bold mb-4">{product.name}</h1>
             {product.rating_count > 0 && (
               <div className="flex items-center gap-2 mb-4">
@@ -143,8 +158,8 @@ function BuilderProductPage({ product, blocks, getCtaUrl, getCtaLabel }: { produ
   const resolveCtaUrl = (blockContent: Record<string, any>) => {
     const actions = blockContent.actions as Action[] | undefined
     if (actions?.length) {
-      const url = getProductPurchaseUrl(actions, product.slug)
-      if (url !== `/checkout?product=${product.slug}`) return url
+      const url = getProductPurchaseUrl(actions, product.id)
+      if (url !== `/checkout?product_id=${product.id}`) return url
     }
     return getCtaUrl(actions)
   }
@@ -160,13 +175,11 @@ function BuilderProductPage({ product, blocks, getCtaUrl, getCtaLabel }: { produ
           case 'section': return (
             <div key={block.id} className="py-4" style={{ background: content.bgColor, padding: `${content.padding}px 0` }}>
               <div className="mx-auto px-4" style={{ maxWidth: content.maxWidth ? `${content.maxWidth}px` : '1200px' }}>
-                {/* Section content is inline */}
               </div>
             </div>
           )
           case 'container': return (
             <div key={block.id} className="mx-auto px-4 rounded-xl" style={{ maxWidth: content.maxWidth ? `${content.maxWidth}px` : '1200px', padding: `${content.padding}px`, background: content.bgColor, borderRadius: `${content.borderRadius}px` }}>
-              {/* Container content */}
             </div>
           )
           case 'hero': return (

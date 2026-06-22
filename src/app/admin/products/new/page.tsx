@@ -40,7 +40,6 @@ export default function NewProductPage() {
 
   const [form, setForm] = useState({
     name: '',
-    slug: '',
     description: '',
     short_description: '',
     price: '',
@@ -65,9 +64,6 @@ export default function NewProductPage() {
       setCategories(data || [])
     })
   }, [])
-
-  const generateSlug = (name: string) =>
-    name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -102,7 +98,6 @@ export default function NewProductPage() {
   const validateForm = (): boolean => {
     if (!form.name.trim()) { toast.error('Name is required'); return false }
 
-    // If variants are enabled, validate them
     if (variantsEnabled) {
       if (variants.length === 0) {
         toast.error('At least one variant is required when variants are enabled')
@@ -111,7 +106,6 @@ export default function NewProductPage() {
       const variantError = validateVariants(variants)
       if (variantError) { toast.error(variantError); return false }
     } else {
-      // Only require price when variants are not enabled
       if (!form.price || parseFloat(form.price) <= 0) {
         toast.error('Price must be greater than 0')
         return false
@@ -141,55 +135,30 @@ export default function NewProductPage() {
     if (!validateForm()) return
     setLoading(true)
 
-    const slug = form.slug || generateSlug(form.name)
-
-    // Check for duplicate name or slug
+    // Check for duplicate name
     const { data: existingProducts } = await supabase
       .from('products')
-      .select('id, name, slug')
-      .or(`name.eq.${form.name},slug.eq.${slug}`)
+      .select('id, name')
+      .eq('name', form.name)
 
     if (existingProducts && existingProducts.length > 0) {
-      const duplicateName = existingProducts.find(p => p.name.toLowerCase() === form.name.toLowerCase())
-      const duplicateSlug = existingProducts.find(p => p.slug === slug)
-      if (duplicateName) {
-        toast.error('Product name already exists. Please choose a different name.')
-      } else if (duplicateSlug) {
-        toast.error('Slug already exists. Please choose a different slug.')
-      }
+      toast.error('Product name already exists. Please choose a different name.')
       setLoading(false)
       return
     }
 
-    let imageUrl: string | null = null
-    let downloadFilePath: string | null = null
-
-    if (imageFile) {
-      setImageUploading(true)
-      imageUrl = await uploadProductImage(imageFile, slug)
-      setImageUploading(false)
-      if (!imageUrl) { toast.error('Image upload failed'); setLoading(false); return }
-    }
-
-    if (form.download_type === 'file_upload' && downloadFile) {
-      setDownloadUploading(true)
-      downloadFilePath = await uploadProductDownload(downloadFile, slug)
-      setDownloadUploading(false)
-      if (!downloadFilePath) { toast.error('File upload failed'); setLoading(false); return }
-    }
-
+    // Create product with UUID first
     const payload: Record<string, unknown> = {
       name: form.name,
-      slug,
       description: form.description || null,
       short_description: form.short_description || null,
       price: variantsEnabled ? 0 : parseFloat(form.price),
       compare_price: form.compare_price ? parseFloat(form.compare_price) : null,
       category_id: form.category_id || null,
-      image_url: imageUrl,
+      image_url: null,
       status: form.status,
       download_type: form.download_type || null,
-      download_file: form.download_type === 'file_upload' ? downloadFilePath : null,
+      download_file: null,
       download_url: form.download_type === 'external_url' ? form.download_url : null,
       affiliate_enabled: form.affiliate_enabled,
       license_enabled: form.license_enabled && !variantsEnabled,
@@ -207,21 +176,64 @@ export default function NewProductPage() {
       payload.custom_license_days = form.license_duration === 'custom' ? parseInt(form.custom_license_days) : null
     }
 
-    const { data, error } = await supabase.from('products').insert(payload).select('id').single()
+    const { data: newProduct, error: insertError } = await supabase
+      .from('products')
+      .insert(payload)
+      .select('id')
+      .single()
 
-    if (error) {
-      toast.error('Failed to save product: ' + error.message)
+    if (insertError || !newProduct) {
+      toast.error('Failed to create product: ' + (insertError?.message || 'Unknown error'))
       setLoading(false)
       return
     }
 
+    const productId = newProduct.id
+    console.log('Product UUID:', productId)
+
+    // Upload files using the product UUID
+    let imageUrl: string | null = null
+    let downloadFilePath: string | null = null
+
+    if (imageFile) {
+      setImageUploading(true)
+      imageUrl = await uploadProductImage(imageFile, productId)
+      setImageUploading(false)
+      if (!imageUrl) {
+        toast.error('Image upload failed')
+        await supabase.from('products').delete().eq('id', productId)
+        setLoading(false)
+        return
+      }
+    }
+
+    if (form.download_type === 'file_upload' && downloadFile) {
+      setDownloadUploading(true)
+      downloadFilePath = await uploadProductDownload(downloadFile, productId)
+      setDownloadUploading(false)
+      if (!downloadFilePath) {
+        toast.error('File upload failed')
+        await supabase.from('products').delete().eq('id', productId)
+        setLoading(false)
+        return
+      }
+    }
+
+    // Update product with file URLs
+    if (imageUrl || downloadFilePath) {
+      const updatePayload: Record<string, unknown> = {}
+      if (imageUrl) updatePayload.image_url = imageUrl
+      if (downloadFilePath) updatePayload.download_file = downloadFilePath
+
+      await supabase.from('products').update(updatePayload).eq('id', productId)
+    }
+
     // Save variants if enabled
     if (variantsEnabled && variants.length > 0) {
-      const variantPayloads = variants.map((v, idx) => prepareVariantForSave(v, data.id, idx))
+      const variantPayloads = variants.map((v, idx) => prepareVariantForSave(v, productId, idx))
       const { error: variantError } = await supabase.from('product_variants').insert(variantPayloads)
       if (variantError) {
-        // Rollback - delete the product since variants failed
-        await supabase.from('products').delete().eq('id', data.id)
+        await supabase.from('products').delete().eq('id', productId)
         toast.error('Failed to save variants: ' + variantError.message)
         setLoading(false)
         return
@@ -229,7 +241,7 @@ export default function NewProductPage() {
     }
 
     toast.success('Product saved!')
-    router.push(`/admin/products/${data.id}/builder`)
+    router.push(`/admin/products/${productId}/builder`)
   }
 
   return (
@@ -241,15 +253,9 @@ export default function NewProductPage() {
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Name *</Label>
-                <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value, slug: form.slug || generateSlug(e.target.value) })} required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="slug">Slug</Label>
-                <Input id="slug" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="auto-generated" />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="name">Name *</Label>
+              <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </div>
 
             <div className="space-y-2">
@@ -262,7 +268,7 @@ export default function NewProductPage() {
               <Textarea id="description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
 
-            {/* Price Section - only show when variants are disabled */}
+            {/* Price Section */}
             <div className="border rounded-lg p-4 space-y-4">
               <h3 className="font-semibold">Pricing</h3>
               <VariantEditor

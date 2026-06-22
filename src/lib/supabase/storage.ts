@@ -3,11 +3,12 @@ import { createBrowserClient } from './client'
 const BUCKET_NAME = 'product-images'
 const DOWNLOADS_BUCKET = 'product-downloads'
 
-export async function uploadProductImage(file: File, productSlug: string): Promise<string | null> {
+export async function uploadProductImage(file: File, productId: string): Promise<string | null> {
   const supabase = createBrowserClient()
+  console.log('Uploading image for product UUID:', productId)
 
   const ext = file.name.split('.').pop()?.toLowerCase()
-  const fileName = `${productSlug}-${Date.now()}.${ext}`
+  const fileName = `${productId}-${Date.now()}.${ext}`
   const filePath = `products/${fileName}`
 
   const { error } = await supabase.storage
@@ -29,11 +30,12 @@ export async function uploadProductImage(file: File, productSlug: string): Promi
   return publicUrl
 }
 
-export async function uploadProductDownload(file: File, productSlug: string): Promise<string | null> {
+export async function uploadProductDownload(file: File, productId: string): Promise<string | null> {
   const supabase = createBrowserClient()
+  console.log('Uploading download for product UUID:', productId)
 
   const ext = file.name.split('.').pop()?.toLowerCase()
-  const fileName = `${productSlug}-${Date.now()}.${ext}`
+  const fileName = `${productId}-${Date.now()}.${ext}`
   const filePath = `downloads/${fileName}`
 
   const { error } = await supabase.storage
@@ -128,11 +130,12 @@ export function getDownloadUrl(filePath: string): string {
 // Category image uploads
 const CATEGORIES_BUCKET = 'product-images'
 
-export async function uploadCategoryImage(file: File, categorySlug: string): Promise<string | null> {
+export async function uploadCategoryImage(file: File, categoryId: string): Promise<string | null> {
   const supabase = createBrowserClient()
+  console.log('Uploading image for category UUID:', categoryId)
 
   const ext = file.name.split('.').pop()?.toLowerCase()
-  const fileName = `${categorySlug}-${Date.now()}.${ext}`
+  const fileName = `${categoryId}-${Date.now()}.${ext}`
   const filePath = `categories/${fileName}`
 
   const { error } = await supabase.storage

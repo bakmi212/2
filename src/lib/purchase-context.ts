@@ -24,7 +24,6 @@ import { createBrowserClient } from '@/lib/supabase/client'
 export interface Product {
   id: string
   name: string
-  slug: string
   description: string | null
   short_description: string | null
   thumbnail: string | null
@@ -93,75 +92,48 @@ export interface OrderResult {
 // ============================================
 
 /**
- * Load product from Supabase by ID or slug
+ * Load product from Supabase by UUID ONLY
+ * NO slug support - slugs are deprecated
  */
 export async function loadProduct(
   supabase: ReturnType<typeof createBrowserClient>,
-  productRef: string // ID or slug
+  productId: string
 ): Promise<Product | null> {
   console.log('[loadProduct] ========== START ==========')
-  console.log('[loadProduct] Product Param:', productRef)
+  console.log('[loadProduct] Product UUID:', productId)
 
-  // Detect if productRef is UUID or slug
-  const isUUID = isValidUUID(productRef)
-  console.log('[loadProduct] Detected Type:', isUUID ? 'UUID' : 'slug')
-
-  let product: Product | null = null
-
-  if (isUUID) {
-    // Query by UUID
-    console.log('[loadProduct] Querying by UUID:', productRef)
-    const { data, error } = await supabase
-      .from('products')
-      .select(`
-        id, name, slug, description, short_description,
-        image_url, price, status, is_active, variants_enabled,
-        enable_license, license_enabled, license_duration,
-        custom_license_days, download_enabled
-      `)
-      .eq('id', productRef)
-      .eq('is_active', true)
-      .single()
-
-    if (error) {
-      console.error('[loadProduct] UUID query error:', error.message)
-    }
-    product = data
-  } else {
-    // Query by slug
-    console.log('[loadProduct] Querying by slug:', productRef)
-    const { data, error } = await supabase
-      .from('products')
-      .select(`
-        id, name, slug, description, short_description,
-        image_url, price, status, is_active, variants_enabled,
-        enable_license, license_enabled, license_duration,
-        custom_license_days, download_enabled
-      `)
-      .eq('slug', productRef)
-      .eq('is_active', true)
-      .single()
-
-    if (error) {
-      console.error('[loadProduct] Slug query error:', error.message)
-    }
-    product = data
+  // Validate UUID format - reject slug-like values
+  if (!isValidUUID(productId)) {
+    console.error('[loadProduct] Invalid product ID format. Expected UUID, got:', productId)
+    return null
   }
 
-  if (!product) {
-    console.error('[loadProduct] Product not found for:', productRef)
+  // Query by UUID
+  const { data, error } = await supabase
+    .from('products')
+    .select(`
+      id, name, description, short_description,
+      image_url, price, status, is_active, variants_enabled,
+      enable_license, license_enabled, license_duration,
+      custom_license_days, download_enabled
+    `)
+    .eq('id', productId)
+    .eq('is_active', true)
+    .single()
+
+  if (error) {
+    console.error('[loadProduct] Query error:', error.message)
     return null
   }
 
   console.log('[loadProduct] Loaded Product:', JSON.stringify({
-    id: product.id,
-    name: product.name,
-    slug: product.slug,
-    price: product.price
+    id: data.id,
+    name: data.name,
+    price: data.price
   }))
   console.log('[loadProduct] ========== END ==========')
 
-  return product
+  return data
 }
 
 /**
@@ -273,7 +245,7 @@ export async function createPurchaseContext(
     error: null
   }
 
-  // Validate product_id exists
+  // Validate product_id exists and is valid UUID
   if (!params.productId) {
     console.error('[createPurchaseContext] Missing product parameter')
     return {
@@ -282,16 +254,22 @@ export async function createPurchaseContext(
     }
   }
 
-  // Detect parameter type
-  const isUUID = isValidUUID(params.productId)
-  console.log('[createPurchaseContext] Detected Product Param Type:', isUUID ? 'UUID' : 'slug')
+  // Validate UUID format - reject slug-like values
+  if (!isValidUUID(params.productId)) {
+    console.error('[createPurchaseContext] Invalid product ID format. Expected UUID, got:', params.productId)
+    return {
+      ...emptyContext,
+      product_id: params.productId,
+      error: 'Invalid product ID. Must be valid UUID.'
+    }
+  }
 
-  // 1. Load product from Supabase (handles both UUID and slug)
-  console.log('[createPurchaseContext] Loading product...')
+  // 1. Load product from Supabase by UUID
+  console.log('[createPurchaseContext] Loading product by UUID:', params.productId)
   const product = await loadProduct(supabase, params.productId)
 
   if (!product) {
-    console.error('[createPurchaseContext] Product not found for:', params.productId)
+    console.error('[createPurchaseContext] Product not found for UUID:', params.productId)
     return {
       ...emptyContext,
       product_id: params.productId,
@@ -302,7 +280,6 @@ export async function createPurchaseContext(
   console.log('[createPurchaseContext] Product loaded:', JSON.stringify({
     id: product.id,
     name: product.name,
-    slug: product.slug,
     price: product.price
   }))
 

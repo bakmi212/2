@@ -13,7 +13,6 @@ import { toast } from 'sonner'
 interface Product {
   id: string
   name: string
-  slug: string
   price: number
   status: string
   affiliate_enabled: boolean
@@ -25,7 +24,6 @@ interface Product {
 interface ProductRow {
   id: string
   name: string
-  slug: string
   price: number
   status: string
   affiliate_enabled: boolean
@@ -51,7 +49,7 @@ export default function AdminProductsPage() {
     setLoading(true)
     const { data, error } = await supabase
       .from('products')
-      .select('id, name, slug, price, status, affiliate_enabled, commission_type, commission_value, image_url, category:categories(name)')
+      .select('id, name, price, status, affiliate_enabled, commission_type, commission_value, image_url, category:categories(name)')
       .order('created_at', { ascending: false })
     if (error) {
       toast.error('Failed to load products')
@@ -147,7 +145,7 @@ export default function AdminProductsPage() {
                       )}
                     </td>
                     <td className="py-3 px-4">
-                      <Link href={`/products/${product.slug}`} className="font-medium hover:underline">
+                      <Link href={`/products/${product.id}`} className="font-medium hover:underline">
                         {product.name}
                       </Link>
                     </td>
@@ -163,7 +161,7 @@ export default function AdminProductsPage() {
                         <Link href={`/admin/products/${product.id}/builder`}>
                           <Button size="sm" variant="outline"><Hammer className="h-3 w-3 mr-1" />Builder</Button>
                         </Link>
-                        <Link href={`/products/${product.slug}`} target="_blank">
+                        <Link href={`/products/${product.id}`} target="_blank">
                           <Button size="sm" variant="outline"><ExternalLink className="h-3 w-3 mr-1" />Preview</Button>
                         </Link>
                         <Button size="sm" variant="outline" className="text-destructive" onClick={() => handleDeleteClick(product)}>
