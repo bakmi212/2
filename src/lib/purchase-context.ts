@@ -1,6 +1,149 @@
 // Full Purchase Context — TypeScript types and client utility
 // Used by: Builder → Checkout → Order → Payment → Affiliate → Membership → Analytics
 
+import type { SupabaseClient } from '@supabase/supabase-js'
+
+// ---------------------------------------------------------------------------
+// formatIDR — used by Checkout, Orders pages
+// ---------------------------------------------------------------------------
+export function formatIDR(amount: number): string {
+  return new Intl.NumberFormat('id-ID', {
+    style: 'currency',
+    currency: 'IDR',
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+// ---------------------------------------------------------------------------
+// PurchaseContext — runtime context built in Checkout
+// ---------------------------------------------------------------------------
+export interface PurchaseContext {
+  product_id: string
+  variant_id: string | null
+  user_id: string | null
+  product: any
+  variant: any | null
+  price: number
+  total: number
+  validated: boolean
+  error: string | null
+}
+
+// ---------------------------------------------------------------------------
+// createPurchaseContext — loads product + variant from Supabase, builds context
+// UUID primary, slug fallback (Checkout Rule)
+// ---------------------------------------------------------------------------
+export async function createPurchaseContext(
+  supabase: SupabaseClient,
+  params: { productId: string; variantId?: string }
+): Promise<PurchaseContext> {
+  const base: PurchaseContext = {
+    product_id: params.productId,
+    variant_id: params.variantId || null,
+    user_id: null,
+    product: null,
+    variant: null,
+    price: 0,
+    total: 0,
+    validated: false,
+    error: null,
+  }
+
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    params.productId
+  )
+  const col = isUUID ? 'id' : 'slug'
+  const { data: product, error: productError } = await supabase
+    .from('products')
+    .select('*')
+    .eq(col, params.productId)
+    .maybeSingle()
+
+  if (productError || !product) {
+    return { ...base, error: productError?.message || 'Product not found' }
+  }
+
+  let variant: any = null
+  if (params.variantId) {
+    const { data: v } = await supabase
+      .from('product_variants')
+      .select('*')
+      .eq('id', params.variantId)
+      .eq('product_id', product.id)
+      .maybeSingle()
+    variant = v
+    if (!v) {
+      return { ...base, product, error: 'Variant not found' }
+    }
+  }
+
+  const price = variant?.price ?? product.price ?? 0
+  return {
+    product_id: product.id,
+    variant_id: variant?.id || null,
+    user_id: null,
+    product,
+    variant,
+    price,
+    total: price,
+    validated: true,
+    error: null,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// createOrderFromContext — creates an order from a validated PurchaseContext
+// ---------------------------------------------------------------------------
+export async function createOrderFromContext(
+  supabase: SupabaseClient,
+  context: PurchaseContext,
+  form: { name: string; email: string; phone?: string; notes?: string },
+  options: { payment_method?: string; payment_account_id?: string } = {}
+): Promise<{ success: boolean; order?: any; error?: string }> {
+  if (!context.validated || !context.product) {
+    return { success: false, error: 'Invalid purchase context' }
+  }
+
+  const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+
+  const { data: order, error: orderError } = await supabase
+    .from('orders')
+    .insert({
+      user_id: context.user_id,
+      order_number: orderNumber,
+      total_amount: context.total,
+      status: 'pending',
+      payment_status: 'pending_payment',
+      order_status: 'pending',
+      payment_method: options.payment_method || null,
+      payment_account_id: options.payment_account_id || null,
+      billing_name: form.name,
+      billing_email: form.email,
+      billing_phone: form.phone || null,
+      notes: form.notes || null,
+      product_id: context.product_id,
+      variant_id: context.variant_id,
+    })
+    .select()
+    .single()
+
+  if (orderError || !order) {
+    return { success: false, error: orderError?.message || 'Failed to create order' }
+  }
+
+  await supabase.from('order_items').insert({
+    order_id: order.id,
+    product_id: context.product_id,
+    variant_id: context.variant_id,
+    quantity: 1,
+    price: context.price,
+    product_name: context.product?.name || null,
+    variant_name: context.variant?.name || null,
+  })
+
+  return { success: true, order: { ...order, order_id: order.id } }
+}
+
 export interface ProductContext {
   product_id: string | null;
   product_slug: string | null;

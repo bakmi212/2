@@ -41,14 +41,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const { id } = await params
   const supabase = await createServerClient()
 
-  // Validate UUID format
-  if (!isValidUUID(id)) {
-    console.error('Invalid product ID format. Expected UUID, got:', id)
-    notFound()
-  }
-
-  // Query by UUID, not slug
-  const { data: product } = await supabase.from('products').select('*, category:categories(*)').eq('id', id).single()
+  // UUID primary, slug fallback (Checkout Rule)
+  let query = supabase.from('products').select('*, category:categories(*)')
+  const productQuery = isValidUUID(id) ? query.eq('id', id) : query.eq('slug', id)
+  const { data: product } = await productQuery.maybeSingle()
   if (!product) notFound()
 
   console.log('Product UUID:', product.id)
