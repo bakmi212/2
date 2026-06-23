@@ -26,6 +26,7 @@ interface Category {
 
 interface Product {
   id: string
+  slug: string | null
   name: string
   description: string | null
   short_description: string | null
@@ -65,6 +66,14 @@ interface ProductVariant {
   sort_order: number
 }
 
+function generateUniqueSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
 function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const router = useRouter()
@@ -85,7 +94,7 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
   const [variants, setVariants] = useState<Variant[]>([])
 
   const [form, setForm] = useState<Record<string, any>>({
-    name: '', description: '', short_description: '', price: '', compare_price: '', category_id: '',
+    name: '', slug: '', description: '', short_description: '', price: '', compare_price: '', category_id: '',
     image_url: '', status: 'active', download_type: '', download_url: '',
     affiliate_enabled: false, commission_type: '', commission_value: '',
     license_enabled: false, license_type: '', license_duration: '', custom_license_days: '',
@@ -104,6 +113,7 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
         setForm({
           id: product.id,
           name: product.name || '',
+          slug: product.slug || generateUniqueSlug(product.name || ''),
           description: product.description || '',
           short_description: product.short_description || '',
           price: product.price?.toString() || '',
@@ -249,8 +259,31 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
       downloadFilePath = null
     }
 
+    // Ensure slug is valid before updating
+    let slug = form.slug?.trim() || generateUniqueSlug(form.name)
+    if (!slug) {
+      toast.error('Could not generate a valid slug from product name')
+      setSaving(false)
+      return
+    }
+
+    // Ensure slug uniqueness if changed
+    if (slug !== form.slug) {
+      const { data: existingSlugs } = await supabase
+        .from('products')
+        .select('slug')
+        .eq('slug', slug)
+        .neq('id', id)
+
+      if (existingSlugs && existingSlugs.length > 0) {
+        const timestamp = Date.now().toString(36)
+        slug = `${slug}-${timestamp}`
+      }
+    }
+
     const payload: Record<string, any> = {
       name: form.name,
+      slug: slug,
       description: form.description || null,
       short_description: form.short_description || null,
       price: variantsEnabled ? 0 : parseFloat(form.price),
@@ -340,7 +373,10 @@ function EditProductForm({ params }: { params: Promise<{ id: string }> }) {
         </CardHeader>
         <form onSubmit={handleSave}>
           <CardContent className="space-y-4">
-            <div className="space-y-2"><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
+            <div className="space-y-2"><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value, slug: form.slug || generateUniqueSlug(e.target.value) })} required /></div>
+            <div className="space-y-2"><Label>Slug</Label><Input value={form.slug || ''} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="auto-generated-from-name" />
+              <p className="text-xs text-muted-foreground">URL-friendly identifier. Leave empty to auto-generate from name.</p>
+            </div>
             <div className="space-y-2"><Label>Short Description</Label><Input value={form.short_description || ''} onChange={(e) => setForm({ ...form, short_description: e.target.value })} /></div>
             <div className="space-y-2"><Label>Description</Label><Textarea value={form.description || ''} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
 

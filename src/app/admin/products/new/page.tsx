@@ -23,6 +23,14 @@ interface Category {
   name: string
 }
 
+function generateUniqueSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
 export default function NewProductPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
@@ -40,6 +48,8 @@ export default function NewProductPage() {
 
   const [form, setForm] = useState({
     name: '',
+    slug: '',
+    manualSlug: false,
     description: '',
     short_description: '',
     price: '',
@@ -98,6 +108,17 @@ export default function NewProductPage() {
   const validateForm = (): boolean => {
     if (!form.name.trim()) { toast.error('Name is required'); return false }
 
+    // Validate slug
+    const slugToUse = form.slug.trim() || generateUniqueSlug(form.name)
+    if (!slugToUse) {
+      toast.error('Could not generate a valid slug. Please enter a slug manually.')
+      return false
+    }
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slugToUse)) {
+      toast.error('Slug must be lowercase, contain only letters, numbers, and hyphens')
+      return false
+    }
+
     if (variantsEnabled) {
       if (variants.length === 0) {
         toast.error('At least one variant is required when variants are enabled')
@@ -147,9 +168,30 @@ export default function NewProductPage() {
       return
     }
 
+    // Use manual slug or generate from name
+    let slug = form.slug.trim() || generateUniqueSlug(form.name)
+    if (!slug) {
+      toast.error('Could not generate a valid slug from product name')
+      setLoading(false)
+      return
+    }
+
+    // Ensure slug uniqueness
+    const { data: existingSlugs } = await supabase
+      .from('products')
+      .select('slug')
+      .eq('slug', slug)
+
+    let uniqueSlug = slug
+    if (existingSlugs && existingSlugs.length > 0) {
+      const timestamp = Date.now().toString(36)
+      uniqueSlug = `${slug}-${timestamp}`
+    }
+
     // Create product with UUID first
     const payload: Record<string, unknown> = {
       name: form.name,
+      slug: uniqueSlug,
       description: form.description || null,
       short_description: form.short_description || null,
       price: variantsEnabled ? 0 : parseFloat(form.price),
@@ -241,7 +283,8 @@ export default function NewProductPage() {
     }
 
     toast.success('Product saved!')
-    router.push(`/admin/products/${productId}/builder`)
+    // Redirect to product page using the slug
+    router.push(`/products/${uniqueSlug}`)
   }
 
   return (
@@ -255,7 +298,20 @@ export default function NewProductPage() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">Name *</Label>
-              <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+              <Input id="name" value={form.name} onChange={(e) => {
+                const name = e.target.value
+                const newSlug = form.manualSlug ? form.slug : generateUniqueSlug(name)
+                setForm({ ...form, name, slug: newSlug })
+              }} required />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="slug">Slug *</Label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">/products/</span>
+                <Input id="slug" value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value, manualSlug: true })} placeholder="auto-generated-from-name" className="flex-1" />
+              </div>
+              <p className="text-xs text-muted-foreground">URL-friendly identifier. Auto-generated from name, or customize manually. Only lowercase letters, numbers, and hyphens allowed.</p>
             </div>
 
             <div className="space-y-2">

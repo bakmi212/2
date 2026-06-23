@@ -13,7 +13,7 @@ import { Loader2 } from 'lucide-react'
 export default function NewProductPage() {
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({
-    name: '', slug: '', description: '', short_description: '', price: '', compare_price: '', category_id: '', image_url: '', status: 'active' as 'active' | 'sold_out' | 'coming_soon', is_featured: false,
+    name: '', slug: '', manualSlug: false, description: '', short_description: '', price: '', compare_price: '', category_id: '', image_url: '', status: 'active' as 'active' | 'sold_out' | 'coming_soon', is_featured: false,
   })
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
   const router = useRouter()
@@ -28,18 +28,37 @@ export default function NewProductPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name || !form.price) { toast.error('Name and price required'); return }
+
+    // Validate slug
+    const slug = form.slug.trim() || generateSlug(form.name)
+    if (!slug) {
+      toast.error('Could not generate a valid slug. Please enter a slug manually.')
+      return
+    }
+    if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)) {
+      toast.error('Slug must be lowercase, contain only letters, numbers, and hyphens')
+      return
+    }
+
     setLoading(true)
 
-    const slug = form.slug || generateSlug(form.name)
+    // Ensure slug uniqueness
+    const { data: existingSlugs } = await supabase.from('products').select('slug').eq('slug', slug)
+    let uniqueSlug = slug
+    if (existingSlugs && existingSlugs.length > 0) {
+      const timestamp = Date.now().toString(36)
+      uniqueSlug = `${slug}-${timestamp}`
+    }
+
     const { error } = await supabase.from('products').insert({
-      name: form.name, slug, description: form.description || null, short_description: form.short_description || null, price: parseFloat(form.price),
+      name: form.name, slug: uniqueSlug, description: form.description || null, short_description: form.short_description || null, price: parseFloat(form.price),
       compare_price: form.compare_price ? parseFloat(form.compare_price) : null,
       category_id: form.category_id || null, image_url: form.image_url || null, status: form.status, is_featured: form.is_featured,
     })
 
     if (error) { toast.error(error.message); setLoading(false); return }
     toast.success('Product created!')
-    router.push('/dashboard/admin/products')
+    router.push(`/products/${uniqueSlug}`)
   }
 
   return (
@@ -49,9 +68,10 @@ export default function NewProductPage() {
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Name *</Label><Input value={form.name} onChange={(e) => { setForm({ ...form, name: e.target.value, slug: form.slug || generateSlug(e.target.value) }) }} required /></div>
-              <div className="space-y-2"><Label>Slug</Label><Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="auto-generated" /></div>
+              <div className="space-y-2"><Label>Name *</Label><Input value={form.name} onChange={(e) => { const name = e.target.value; setForm({ ...form, name, slug: form.manualSlug ? form.slug : generateSlug(name) }) }} required /></div>
+              <div className="space-y-2"><Label>Slug *</Label><Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value, manualSlug: true })} placeholder="auto-generated-from-name" /></div>
             </div>
+            <p className="text-xs text-muted-foreground -mt-2">Slug is auto-generated from name. Edit manually if needed. Only lowercase letters, numbers, and hyphens allowed.</p>
             <div className="space-y-2"><Label>Short Description</Label><Input value={form.short_description} onChange={(e) => setForm({ ...form, short_description: e.target.value })} placeholder="Brief summary for cards" /></div>
             <div className="space-y-2"><Label>Description</Label><textarea className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Full product description" /></div>
             <div className="grid grid-cols-2 gap-4">
